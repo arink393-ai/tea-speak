@@ -303,14 +303,15 @@
   });
 
   /* ── 辭典查詢：只要輸入包含關鍵字就命中，多筆命中時取最長關鍵字 ── */
+  var PUNCT_RE = /[\s，。！？!?,.~〜、]/g;
   function lookup(text){
-    var t = text.replace(/[\s，。！？!?,.~〜]/g,"");
+    var t = text.replace(PUNCT_RE, "");
     if (!t) return null;
     var best = null, bestLen = 0;
     for (var i = 0; i < DICT.length; i++){
       var entry = DICT[i];
       for (var j = 0; j < entry.k.length; j++){
-        var key = entry.k[j].replace(/\s+/g,"");
+        var key = entry.k[j].replace(PUNCT_RE, "");
         if (t === key) return entry;
         var hit = (t.indexOf(key) !== -1) ||
                   (t.length >= 3 && key.indexOf(t) !== -1);
