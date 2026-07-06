@@ -324,15 +324,17 @@
     return best;
   }
 
-  /* ── Gemini AI 翻譯 ── */
-  function aiTranslate(text, key){
+  /* ── Gemini AI 翻譯 ──
+     使用 gemini-flash-lite-latest：Google 官方維護的別名，
+     會自動指向當前最新的 Flash-Lite 模型，不用擔心舊模型被下架後程式失效。 */
+  function aiTranslate(text, key, isRetry){
     var prompt =
       "你是「高級大人の翻譯器」。使用者會輸入一句心裡真正想說、但比較直白粗俗或情緒化的話，" +
       "請把它翻譯成職場上專業、有教養、不失品格、綿裡藏針的「高級大人」說法。" +
       "要求：使用臺灣繁體中文與臺灣職場慣用語氣；保留原句的真實意圖但包裝得體面；" +
       "一到兩句話即可；只輸出翻譯結果，不要任何解釋或前言。\n\n" +
       "初級大人：" + text + "\n高級大人：";
-    return fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + encodeURIComponent(key), {
+    return fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=" + encodeURIComponent(key), {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({
@@ -341,14 +343,28 @@
       })
     })
     .then(function(res){
-      if (!res.ok) throw new Error("HTTP " + res.status);
+      if (res.status === 429 && !isRetry){
+        // 短暫等待後自動重試一次（常見於瞬間流量限制，非真正額度用盡）
+        return new Promise(function(resolve){ setTimeout(resolve, 1500); })
+          .then(function(){ return aiTranslate(text, key, true); });
+      }
+      if (!res.ok){
+        return res.json().catch(function(){ return null; }).then(function(errBody){
+          var msg = errBody && errBody.error && errBody.error.message;
+          if (res.status === 429){
+            throw new Error("目前請求太頻繁或已達免費額度上限，請等待約 1 分鐘後再試");
+          }
+          throw new Error(msg ? ("HTTP " + res.status + "：" + msg) : ("HTTP " + res.status));
+        });
+      }
       return res.json();
     })
     .then(function(data){
+      if (data && data.__retried) return data; // 不會發生，保留擴充空間
       var parts = data && data.candidates && data.candidates[0] &&
                   data.candidates[0].content && data.candidates[0].content.parts;
       var textOut = parts && parts[0] && parts[0].text ? parts[0].text.trim() : "";
-      if (!textOut) throw new Error("空回應");
+      if (!textOut) throw new Error("AI 沒有回傳內容，請稍後再試");
       return textOut.replace(/^高級大人[:：]\s*/,"");
     });
   }
