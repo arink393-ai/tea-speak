@@ -339,7 +339,9 @@
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({
         contents:[{ parts:[{ text: prompt }] }],
-        generationConfig:{ temperature:0.8, maxOutputTokens:200 }
+        // thinkingBudget:0 關閉思考模式 — 目前的模型預設會思考，
+        // 思考產生的 token 會佔用 maxOutputTokens，若不關閉常導致沒有實際輸出文字。
+        generationConfig:{ temperature:0.8, maxOutputTokens:500, thinkingConfig:{ thinkingBudget:0 } }
       })
     })
     .then(function(res){
@@ -361,10 +363,18 @@
     })
     .then(function(data){
       if (data && data.__retried) return data; // 不會發生，保留擴充空間
-      var parts = data && data.candidates && data.candidates[0] &&
-                  data.candidates[0].content && data.candidates[0].content.parts;
+      var candidate = data && data.candidates && data.candidates[0];
+      var parts = candidate && candidate.content && candidate.content.parts;
       var textOut = parts && parts[0] && parts[0].text ? parts[0].text.trim() : "";
-      if (!textOut) throw new Error("AI 沒有回傳內容，請稍後再試");
+      if (!textOut){
+        if (candidate && candidate.finishReason === "MAX_TOKENS"){
+          throw new Error("AI 回覆被截斷（token 用完），請稍後再試或換句較短的話");
+        }
+        if (candidate && candidate.finishReason === "SAFETY"){
+          throw new Error("這句話被安全機制擋下，AI 無法翻譯");
+        }
+        throw new Error("AI 沒有回傳內容，請稍後再試");
+      }
       return textOut.replace(/^高級大人[:：]\s*/,"");
     });
   }
