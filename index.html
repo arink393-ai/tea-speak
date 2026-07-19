@@ -332,57 +332,76 @@
   }
 
   /* ── Gemini AI 翻譯 ──
-     使用 gemini-flash-lite-latest：Google 官方維護的別名，
-     會自動指向當前最新的 Flash-Lite 模型，不用擔心舊模型被下架後程式失效。 */
-  function aiTranslate(text, key, isRetry){
+     依序嘗試多個模型：gemini-flash-lite-latest 免費額度較低（15 RPM），
+     一旦被限流就自動改用額度較高的穩定版 gemini-2.5-flash-lite（30 RPM）再試一次，
+     大幅降低「單一模型被限流就整個失敗」的機率。 */
+  var AI_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash-lite"];
+
+  function callGemini(prompt, key, model){
+    return fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + encodeURIComponent(key), {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        contents:[{ parts:[{ text: prompt }] }],
+        // thinkingBudget:0 關閉思考模式 — 這幾個模型預設會思考，
+        // 思考產生的 token 會佔用 maxOutputTokens，若不關閉常導致沒有實際輸出文字。
+        generationConfig:{ temperature:0.8, maxOutputTokens:500, thinkingConfig:{ thinkingBudget:0 } }
+      })
+    })
+    .then(function(res){
+      return res.json().catch(function(){ return null; }).then(function(body){
+        return { res: res, body: body };
+      });
+    });
+  }
+
+  function extractText(body){
+    var candidate = body && body.candidates && body.candidates[0];
+    var parts = candidate && candidate.content && candidate.content.parts;
+    var textOut = parts && parts[0] && parts[0].text ? parts[0].text.trim() : "";
+    if (textOut) return textOut.replace(/^高級大人[:：]\s*/,"");
+    if (candidate && candidate.finishReason === "MAX_TOKENS"){
+      throw new Error("AI 回覆被截斷（token 用完），請稍後再試或換句較短的話");
+    }
+    if (candidate && candidate.finishReason === "SAFETY"){
+      throw new Error("這句話被安全機制擋下，AI 無法翻譯");
+    }
+    return null; // 沒有明確錯誤原因，讓呼叫端決定要不要換模型重試
+  }
+
+  function aiTranslate(text, key, modelIndex){
+    modelIndex = modelIndex || 0;
+    var model = AI_MODELS[modelIndex];
+    var isLastModel = modelIndex >= AI_MODELS.length - 1;
     var prompt =
       "你是「高級大人の翻譯器」。使用者會輸入一句心裡真正想說、但比較直白粗俗或情緒化的話，" +
       "請把它翻譯成職場上專業、有教養、不失品格、綿裡藏針的「高級大人」說法。" +
       "要求：使用臺灣繁體中文與臺灣職場慣用語氣；保留原句的真實意圖但包裝得體面；" +
       "一到兩句話即可；只輸出翻譯結果，不要任何解釋或前言。\n\n" +
       "初級大人：" + text + "\n高級大人：";
-    return fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=" + encodeURIComponent(key), {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({
-        contents:[{ parts:[{ text: prompt }] }],
-        // thinkingBudget:0 關閉思考模式 — 目前的模型預設會思考，
-        // 思考產生的 token 會佔用 maxOutputTokens，若不關閉常導致沒有實際輸出文字。
-        generationConfig:{ temperature:0.8, maxOutputTokens:500, thinkingConfig:{ thinkingBudget:0 } }
-      })
-    })
-    .then(function(res){
-      if (res.status === 429 && !isRetry){
-        // 短暫等待後自動重試一次（常見於瞬間流量限制，非真正額度用盡）
-        return new Promise(function(resolve){ setTimeout(resolve, 1500); })
-          .then(function(){ return aiTranslate(text, key, true); });
-      }
+
+    return callGemini(prompt, key, model).then(function(result){
+      var res = result.res, body = result.body;
+
       if (!res.ok){
-        return res.json().catch(function(){ return null; }).then(function(errBody){
-          var msg = errBody && errBody.error && errBody.error.message;
-          if (res.status === 429){
-            throw new Error("目前請求太頻繁或已達免費額度上限，請等待約 1 分鐘後再試");
-          }
-          throw new Error(msg ? ("HTTP " + res.status + "：" + msg) : ("HTTP " + res.status));
-        });
+        var isRateLimited = res.status === 429 || res.status === 503;
+        if (isRateLimited && !isLastModel){
+          // 這個模型被限流／過載，改用下一個模型再試一次
+          return aiTranslate(text, key, modelIndex + 1);
+        }
+        if (isRateLimited){
+          throw new Error("目前所有模型都請求太頻繁或已達免費額度上限，請等待約 1 分鐘後再試");
+        }
+        var msg = body && body.error && body.error.message;
+        throw new Error(msg ? ("HTTP " + res.status + "：" + msg) : ("HTTP " + res.status));
       }
-      return res.json();
-    })
-    .then(function(data){
-      if (data && data.__retried) return data; // 不會發生，保留擴充空間
-      var candidate = data && data.candidates && data.candidates[0];
-      var parts = candidate && candidate.content && candidate.content.parts;
-      var textOut = parts && parts[0] && parts[0].text ? parts[0].text.trim() : "";
-      if (!textOut){
-        if (candidate && candidate.finishReason === "MAX_TOKENS"){
-          throw new Error("AI 回覆被截斷（token 用完），請稍後再試或換句較短的話");
-        }
-        if (candidate && candidate.finishReason === "SAFETY"){
-          throw new Error("這句話被安全機制擋下，AI 無法翻譯");
-        }
+
+      var textOut = extractText(body);
+      if (textOut === null){
+        if (!isLastModel) return aiTranslate(text, key, modelIndex + 1);
         throw new Error("AI 沒有回傳內容，請稍後再試");
       }
-      return textOut.replace(/^高級大人[:：]\s*/,"");
+      return textOut;
     });
   }
 
