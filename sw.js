@@ -1,4 +1,4 @@
-var CACHE = "tea-speak-v1";
+var CACHE = "tea-speak-v2";
 var ASSETS = ["./", "./index.html", "./dict.json", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(e){

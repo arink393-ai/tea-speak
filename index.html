@@ -385,21 +385,20 @@
 
       if (!res.ok){
         var isRateLimited = res.status === 429 || res.status === 503;
+        var rawMsg = body && body.error && body.error.message;
         if (isRateLimited && !isLastModel){
           // 這個模型被限流／過載，改用下一個模型再試一次
           return aiTranslate(text, key, modelIndex + 1);
         }
-        if (isRateLimited){
-          throw new Error("目前所有模型都請求太頻繁或已達免費額度上限，請等待約 1 分鐘後再試");
-        }
-        var msg = body && body.error && body.error.message;
-        throw new Error(msg ? ("HTTP " + res.status + "：" + msg) : ("HTTP " + res.status));
+        // 診斷用：把實際的模型名稱、狀態碼、Google 回傳的原始訊息都顯示出來，
+        // 之後才能判斷到底是額度問題、金鑰權限問題、還是其他原因。
+        throw new Error("[" + model + "] HTTP " + res.status + (rawMsg ? "：" + rawMsg : ""));
       }
 
       var textOut = extractText(body);
       if (textOut === null){
         if (!isLastModel) return aiTranslate(text, key, modelIndex + 1);
-        throw new Error("AI 沒有回傳內容，請稍後再試");
+        throw new Error("[" + model + "] AI 沒有回傳內容，請稍後再試");
       }
       return textOut;
     });
