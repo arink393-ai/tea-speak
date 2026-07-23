@@ -285,8 +285,10 @@
   /* ── API Key 儲存（在瀏覽器環境不支援時自動改用記憶體） ── */
   var memKey = "";
   function getKey(){
-    try { return localStorage.getItem("teaSpeakGeminiKey") || memKey; }
-    catch(e){ return memKey; }
+    var v;
+    try { v = localStorage.getItem("teaSpeakGeminiKey") || memKey; }
+    catch(e){ v = memKey; }
+    return v ? v.replace(/\s+/g, "") : v; // 修正舊版存入、可能夾帶空白的 Key
   }
   function setKey(v){
     memKey = v;
@@ -494,11 +496,19 @@
   }
 
   /* ── 設定區 ── */
+  // Gemini API Key 格式：AIza 開頭，共 39 碼。用來提早抓出貼上時漏字/多空白的狀況，
+  // 不符合格式還是會儲存（避免未來格式變動時擋到正常的 Key），只是提醒。
+  var KEY_FORMAT_RE = /^AIza[0-9A-Za-z_-]{35}$/;
   document.getElementById("saveKeyBtn").addEventListener("click", function(){
-    var v = apiKeyInput.value.trim();
+    var v = apiKeyInput.value.replace(/\s+/g, ""); // 去除貼上時可能夾帶的空白或換行
     if (!v){ keyStatus.textContent = "請先貼上 Key"; return; }
     setKey(v);
-    keyStatus.textContent = "已儲存 ✓";
+    apiKeyInput.value = v;
+    if (!KEY_FORMAT_RE.test(v)){
+      keyStatus.textContent = "已儲存，但格式看起來不太對（應為 AIza 開頭、共 39 碼），請確認複製完整";
+    } else {
+      keyStatus.textContent = "已儲存 ✓";
+    }
   });
   document.getElementById("clearKeyBtn").addEventListener("click", function(){
     clearKey();
