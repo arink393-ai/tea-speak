@@ -495,17 +495,17 @@
     document.body.removeChild(ta);
   }
 
-  /* ── 設定區 ── */
-  // Gemini API Key 格式：AIza 開頭，共 39 碼。用來提早抓出貼上時漏字/多空白的狀況，
-  // 不符合格式還是會儲存（避免未來格式變動時擋到正常的 Key），只是提醒。
-  var KEY_FORMAT_RE = /^AIza[0-9A-Za-z_-]{35}$/;
+  /* ── 設定區 ──
+     Key 的確切格式 Google 會不定期調整，這裡不假設固定前綴或長度，
+     只做最基本的檢查（去除空白、長度不能太短），實際是否有效交給
+     翻譯當下 Gemini API 的回應來判斷，避免格式假設過時反而誤導使用者。 */
   document.getElementById("saveKeyBtn").addEventListener("click", function(){
     var v = apiKeyInput.value.replace(/\s+/g, ""); // 去除貼上時可能夾帶的空白或換行
     if (!v){ keyStatus.textContent = "請先貼上 Key"; return; }
     setKey(v);
     apiKeyInput.value = v;
-    if (!KEY_FORMAT_RE.test(v)){
-      keyStatus.textContent = "已儲存，但格式看起來不太對（應為 AIza 開頭、共 39 碼），請確認複製完整";
+    if (v.length < 10){
+      keyStatus.textContent = "已儲存，但長度看起來太短，請確認複製完整";
     } else {
       keyStatus.textContent = "已儲存 ✓";
     }
